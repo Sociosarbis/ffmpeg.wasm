@@ -1,6 +1,6 @@
 const { defaultArgs, baseOptions } = require('./config');
 const { setLogging, setCustomLogger, log } = require('./utils/log');
-const parseProgress = require('./utils/parseProgress');
+const parseProgressFactory = require('./utils/parseProgress');
 const parseArgs = require('./utils/parseArgs');
 const { defaultOptions, getCreateFFmpegCore } = require('./node');
 const { version } = require('../package.json');
@@ -23,6 +23,11 @@ module.exports = (_options = {}) => {
   let runResolve = null;
   let running = false;
   let progress = optProgress;
+  /**
+   * save the load promise in case of duplicate load calls
+   */
+  let loadPromise;
+  const parseProgress = parseProgressFactory();
   const detectCompletion = (message) => {
     if (message === 'FFMPEG_END' && runResolve !== null) {
       runResolve();
@@ -47,53 +52,59 @@ module.exports = (_options = {}) => {
    * better to do it as early as possible.
    *
    */
-  const load = async () => {
-    log('info', 'load ffmpeg-core');
-    if (Core === null) {
-      log('info', 'loading ffmpeg-core');
-      /*
-       * In node environment, all paths are undefined as there
-       * is no need to set them.
-       */
-      const {
-        createFFmpegCore,
-        corePath,
-        workerPath,
-        wasmPath,
-      } = await getCreateFFmpegCore(options);
-      Core = await createFFmpegCore({
+  const load = () => {
+    if (loadPromise) return loadPromise;
+    loadPromise = new Promise(async (res, rej) => {
+      log('info', 'load ffmpeg-core');
+      if (Core === null) {
+        log('info', 'loading ffmpeg-core');
         /*
-         * Assign mainScriptUrlOrBlob fixes chrome extension web worker issue
-         * as there is no document.currentScript in the context of content_scripts
+         * In node environment, all paths are undefined as there
+         * is no need to set them.
          */
-        mainScriptUrlOrBlob: corePath,
-        printErr: (message) => parseMessage({ type: 'fferr', message }),
-        print: (message) => parseMessage({ type: 'ffout', message }),
-        /*
-         * locateFile overrides paths of files that is loaded by main script (ffmpeg-core.js).
-         * It is critical for browser environment and we override both wasm and worker paths
-         * as we are using blob URL instead of original URL to avoid cross origin issues.
-         */
-        locateFile: (path, prefix) => {
-          if (typeof window !== 'undefined') {
-            if (typeof wasmPath !== 'undefined'
-              && path.endsWith('ffmpeg-core.wasm')) {
-              return wasmPath;
+        const {
+          createFFmpegCore,
+          corePath,
+          workerPath,
+          wasmPath,
+        } = await getCreateFFmpegCore(options);
+        Core = await createFFmpegCore({
+          /*
+           * Assign mainScriptUrlOrBlob fixes chrome extension web worker issue
+           * as there is no document.currentScript in the context of content_scripts
+           */
+          mainScriptUrlOrBlob: corePath,
+          printErr: (message) => parseMessage({ type: 'fferr', message }),
+          print: (message) => parseMessage({ type: 'ffout', message }),
+          /*
+           * locateFile overrides paths of files that is loaded by main script (ffmpeg-core.js).
+           * It is critical for browser environment and we override both wasm and worker paths
+           * as we are using blob URL instead of original URL to avoid cross origin issues.
+           */
+          locateFile: (path, prefix) => {
+            if (typeof window !== 'undefined') {
+              if (typeof wasmPath !== 'undefined'
+                && path.endsWith('ffmpeg-core.wasm')) {
+                return wasmPath;
+              }
+              if (typeof workerPath !== 'undefined'
+                && path.endsWith('ffmpeg-core.worker.js')) {
+                return workerPath;
+              }
             }
-            if (typeof workerPath !== 'undefined'
-              && path.endsWith('ffmpeg-core.worker.js')) {
-              return workerPath;
-            }
-          }
-          return prefix + path;
-        },
-      });
-      ffmpeg = Core.cwrap('proxy_main', 'number', ['number', 'number']);
-      log('info', 'ffmpeg-core loaded');
-    } else {
-      throw Error('ffmpeg.wasm was loaded, you should not load it again, use ffmpeg.isLoaded() to check next time.');
-    }
-  };
+            return prefix + path;
+          },
+        });
+        ffmpeg = Core.cwrap('proxy_main', 'number', ['number', 'number']);
+        log('info', 'ffmpeg-core loaded');
+        res();
+      } else {
+        reject(Error('ffmpeg.wasm was loaded, you should not load it again, use ffmpeg.isLoaded() to check next time.'));
+      }
+      loadPromise = null;
+    });
+    return loadPromise;
+  }
 
 
   /*
@@ -171,6 +182,18 @@ module.exports = (_options = {}) => {
     }
   };
 
+  /**
+   * forcibly terminate the ffmpeg program. If this
+   */
+  const exit = () => {
+    if (Core === null) {
+      throw NO_LOAD;
+    } else {
+      running = false;
+      return Core.exit(1);
+    }
+  }
+
   const setProgress = (_progress) => {
     progress = _progress;
   };
@@ -191,6 +214,7 @@ module.exports = (_options = {}) => {
     load,
     isLoaded,
     run,
+    exit,
     FS,
   };
 };
