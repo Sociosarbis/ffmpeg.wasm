@@ -54,7 +54,7 @@ module.exports = (_options = {}) => {
    */
   const load = () => {
     if (loadPromise) return loadPromise;
-    loadPromise = new Promise(async (res, rej) => {
+    loadPromise = new Promise((res, rej) => {
       log('info', 'load ffmpeg-core');
       if (Core === null) {
         log('info', 'loading ffmpeg-core');
@@ -62,50 +62,50 @@ module.exports = (_options = {}) => {
          * In node environment, all paths are undefined as there
          * is no need to set them.
          */
-        const {
+        getCreateFFmpegCore(options).then(({
           createFFmpegCore,
           corePath,
           workerPath,
           wasmPath,
-        } = await getCreateFFmpegCore(options);
-        Core = await createFFmpegCore({
+        }) => createFFmpegCore({
           /*
-           * Assign mainScriptUrlOrBlob fixes chrome extension web worker issue
-           * as there is no document.currentScript in the context of content_scripts
-           */
+             * Assign mainScriptUrlOrBlob fixes chrome extension web worker issue
+             * as there is no document.currentScript in the context of content_scripts
+             */
           mainScriptUrlOrBlob: corePath,
           printErr: (message) => parseMessage({ type: 'fferr', message }),
           print: (message) => parseMessage({ type: 'ffout', message }),
           /*
-           * locateFile overrides paths of files that is loaded by main script (ffmpeg-core.js).
-           * It is critical for browser environment and we override both wasm and worker paths
-           * as we are using blob URL instead of original URL to avoid cross origin issues.
-           */
+             * locateFile overrides paths of files that is loaded by main script (ffmpeg-core.js).
+             * It is critical for browser environment and we override both wasm and worker paths
+             * as we are using blob URL instead of original URL to avoid cross origin issues.
+             */
           locateFile: (path, prefix) => {
             if (typeof window !== 'undefined') {
               if (typeof wasmPath !== 'undefined'
-                && path.endsWith('ffmpeg-core.wasm')) {
+                  && path.endsWith('ffmpeg-core.wasm')) {
                 return wasmPath;
               }
               if (typeof workerPath !== 'undefined'
-                && path.endsWith('ffmpeg-core.worker.js')) {
+                  && path.endsWith('ffmpeg-core.worker.js')) {
                 return workerPath;
               }
             }
             return prefix + path;
           },
+        })).then((core) => {
+          Core = core;
+          ffmpeg = Core.cwrap('proxy_main', 'number', ['number', 'number']);
+          log('info', 'ffmpeg-core loaded');
+          res();
         });
-        ffmpeg = Core.cwrap('proxy_main', 'number', ['number', 'number']);
-        log('info', 'ffmpeg-core loaded');
-        res();
       } else {
-        reject(Error('ffmpeg.wasm was loaded, you should not load it again, use ffmpeg.isLoaded() to check next time.'));
+        rej(Error('ffmpeg.wasm was loaded, you should not load it again, use ffmpeg.isLoaded() to check next time.'));
       }
       loadPromise = null;
     });
     return loadPromise;
-  }
-
+  };
 
   /*
    * Determine whether the Core is loaded.
@@ -192,7 +192,7 @@ module.exports = (_options = {}) => {
       running = false;
       return Core.exit(1);
     }
-  }
+  };
 
   const setProgress = (_progress) => {
     progress = _progress;
