@@ -97,12 +97,13 @@ module.exports = (_options = {}) => {
           Core = core;
           ffmpeg = Core.cwrap('proxy_main', 'number', ['number', 'number']);
           log('info', 'ffmpeg-core loaded');
+          loadPromise = null;
           res();
         });
       } else {
+        loadPromise = null;
         rej(Error('ffmpeg.wasm was loaded, you should not load it again, use ffmpeg.isLoaded() to check next time.'));
       }
-      loadPromise = null;
     });
     return loadPromise;
   };
@@ -190,7 +191,10 @@ module.exports = (_options = {}) => {
       throw NO_LOAD;
     } else {
       running = false;
-      return Core.exit(1);
+      Core.exit(1);
+      Core = null;
+      ffmpeg = null;
+      runResolve = null;
     }
   };
 
