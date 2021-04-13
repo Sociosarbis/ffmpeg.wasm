@@ -1,6 +1,6 @@
 const { defaultArgs, baseOptions } = require('./config');
 const { setLogging, setCustomLogger, log } = require('./utils/log');
-const parseProgressFactory = require('./utils/parseProgress');
+const ProgressObserver = require('./utils/parseProgress');
 const parseArgs = require('./utils/parseArgs');
 const { defaultOptions, getCreateFFmpegCore } = require('./node');
 const { version } = require('../package.json');
@@ -22,12 +22,11 @@ module.exports = (_options = {}) => {
   let ffmpeg = null;
   let runResolve = null;
   let running = false;
-  let progress = optProgress;
   /**
    * save the load promise in case of duplicate load calls
    */
   let loadPromise;
-  const parseProgress = parseProgressFactory();
+  const progressObserver = new ProgressObserver(optProgress);
   const detectCompletion = (message) => {
     if (message === 'FFMPEG_END' && runResolve !== null) {
       runResolve();
@@ -37,7 +36,7 @@ module.exports = (_options = {}) => {
   };
   const parseMessage = ({ type, message }) => {
     log(type, message);
-    parseProgress(message, progress);
+    progressObserver.observe(message);
     detectCompletion(message);
   };
 
@@ -142,6 +141,7 @@ module.exports = (_options = {}) => {
       return new Promise((resolve) => {
         const args = [...defaultArgs, ..._args].filter((s) => s.length !== 0);
         runResolve = resolve;
+        progressObserver.resetState();
         ffmpeg(...parseArgs(Core, args));
       });
     }
@@ -199,7 +199,7 @@ module.exports = (_options = {}) => {
   };
 
   const setProgress = (_progress) => {
-    progress = _progress;
+    progressObserver.onProgress = _progress;
   };
 
   const setLogger = (_logger) => {
